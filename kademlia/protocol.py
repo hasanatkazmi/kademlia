@@ -34,6 +34,8 @@ class KademliaProtocol(RPCProtocol):
     def rpc_ping(self, sender, nodeid, puzzle):
         log.debug('verifying puzzle %s', puzzle.hex())
         if not verify_node_id(nodeid) or not verify_puzzle(nodeid, puzzle):
+            log.info('verification failed for %s (%s:%s)',
+                     nodeid, sender[0], sender[1])
             return False
         source = Node(nodeid, sender[0], sender[1])
         self.welcome_if_new(source)
