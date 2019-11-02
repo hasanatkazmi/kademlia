@@ -1,13 +1,12 @@
 """
 Package for interacting on the network at a high level.
 """
-import random
 import pickle
 import asyncio
 import logging
 
 from kademlia.protocol import KademliaProtocol
-from kademlia.utils import digest
+from kademlia.utils import digest, generate_node_id, solve_puzzle
 from kademlia.storage import ForgetfulStorage
 from kademlia.node import Node
 from kademlia.crawling import ValueSpiderCrawl
@@ -39,7 +38,7 @@ class Server:
         self.ksize = ksize
         self.alpha = alpha
         self.storage = storage or ForgetfulStorage()
-        self.node = Node(node_id or digest(random.getrandbits(255)))
+        self.node = Node(node_id or generate_node_id())
         self.transport = None
         self.protocol = None
         self.refresh_loop = None
@@ -130,7 +129,9 @@ class Server:
         return await spider.find()
 
     async def bootstrap_node(self, addr):
-        result = await self.protocol.ping(addr, self.node.id)
+        puz = solve_puzzle(self.node.id)
+        log.debug('sending puzzle during bootstrap %s', puz.hex())
+        result = await self.protocol.ping(addr, self.node.id, puz)
         return Node(result[1], addr[0], addr[1]) if result[0] else None
 
     async def get(self, key):

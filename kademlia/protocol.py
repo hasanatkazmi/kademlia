@@ -6,7 +6,7 @@ from rpcudp.protocol import RPCProtocol
 
 from kademlia.node import Node
 from kademlia.routing import RoutingTable
-from kademlia.utils import digest
+from kademlia.utils import digest, solve_puzzle, verify_node_id, verify_puzzle
 
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -31,7 +31,10 @@ class KademliaProtocol(RPCProtocol):
     def rpc_stun(self, sender):  # pylint: disable=no-self-use
         return sender
 
-    def rpc_ping(self, sender, nodeid):
+    def rpc_ping(self, sender, nodeid, puzzle):
+        log.debug('verifying puzzle %s', puzzle.hex())
+        if not verify_node_id(nodeid) or not verify_puzzle(nodeid, puzzle):
+            return False
         source = Node(nodeid, sender[0], sender[1])
         self.welcome_if_new(source)
         return self.source_node.id
@@ -75,7 +78,9 @@ class KademliaProtocol(RPCProtocol):
 
     async def call_ping(self, node_to_ask):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.ping(address, self.source_node.id)
+        puz = solve_puzzle(self.source_node.id)
+        log.debug('sending puzzle %s', puz.hex())
+        result = await self.ping(address, self.source_node.id, puz)
         return self.handle_call_response(result, node_to_ask)
 
     async def call_store(self, node_to_ask, key, value):

@@ -1,10 +1,12 @@
 *.pickle
 *.pid
+.idea
 _trial_temp
 apidoc
 *.pyc
 build
 dist
+env
 kademlia.egg-info
 docs/_build
 .coverage
