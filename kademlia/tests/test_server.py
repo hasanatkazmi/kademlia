@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import contextmanager
 
 import pytest
 
@@ -6,17 +7,22 @@ from kademlia.network import Server
 from kademlia.protocol import KademliaProtocol
 
 
+@contextmanager
+def server_context(server):
+    try:
+        yield server
+    finally:
+        server.stop()
+
+
 @pytest.mark.asyncio
 async def test_storing(bootstrap_node):
-    server = Server()
-    await server.listen(bootstrap_node[1] + 1)
-    await server.bootstrap([bootstrap_node])
-    await server.set('key', 'value')
-    result = await server.get('key')
-
-    assert result == 'value'
-
-    server.stop()
+    with server_context(Server()) as server:
+        await server.listen(bootstrap_node[1] + 1)
+        await server.bootstrap([bootstrap_node])
+        await server.set('key', 'value')
+        result = await server.get('key')
+        assert result == 'value'
 
 
 class TestSwappableProtocol:
@@ -28,11 +34,10 @@ class TestSwappableProtocol:
         method is called.
         """
         loop = asyncio.get_event_loop()
-        server = Server()
-        assert server.protocol is None
-        loop.run_until_complete(server.listen(8469))
-        assert isinstance(server.protocol, KademliaProtocol)
-        server.stop()
+        with server_context(Server()) as server:
+            assert server.protocol is None
+            loop.run_until_complete(server.listen(8469))
+            assert isinstance(server.protocol, KademliaProtocol)
 
     def test_custom_protocol(self):  # pylint: disable=no-self-use
         """
@@ -50,13 +55,11 @@ class TestSwappableProtocol:
 
         # An ordinary server does NOT have a CoconutProtocol as its protocol...
         loop = asyncio.get_event_loop()
-        server = Server()
-        loop.run_until_complete(server.listen(8469))
-        assert not isinstance(server.protocol, CoconutProtocol)
-        server.stop()
+        with server_context(Server()) as server:
+            loop.run_until_complete(server.listen(8469))
+            assert not isinstance(server.protocol, CoconutProtocol)
 
         # ...but our custom server does.
-        husk_server = HuskServer()
-        loop.run_until_complete(husk_server.listen(8469))
-        assert isinstance(husk_server.protocol, CoconutProtocol)
-        husk_server.stop()
+        with server_context(HuskServer()) as husk_server:
+            loop.run_until_complete(husk_server.listen(8469))
+            assert isinstance(husk_server.protocol, CoconutProtocol)

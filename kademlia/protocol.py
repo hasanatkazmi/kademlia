@@ -18,6 +18,20 @@ class KademliaProtocol(RPCProtocol):
         self.storage = storage
         self.source_node = source_node
 
+    def verify_integrity(self, sender, nodeid, puzzle):
+        log.debug('verifying puzzle %s', puzzle.hex())
+        if not verify_node_id(nodeid) or not verify_puzzle(nodeid, puzzle):
+            log.info('verification failed for %s (%s:%s)',
+                     nodeid, sender[0], sender[1])
+            self.router.remove_contact(Node(nodeid, sender[0], sender[1]))
+            return False
+        return True
+
+    def create_integrity(self):
+        puzzle = solve_puzzle(self.source_node.id)
+        log.debug('sending puzzle %s', puzzle.hex())
+        return puzzle
+
     def get_refresh_ids(self):
         """
         Get ids to search for to keep old buckets up to date.
@@ -32,62 +46,66 @@ class KademliaProtocol(RPCProtocol):
         return sender
 
     def rpc_ping(self, sender, nodeid, puzzle):
-        log.debug('verifying puzzle %s', puzzle.hex())
-        if not verify_node_id(nodeid) or not verify_puzzle(nodeid, puzzle):
-            log.info('verification failed for %s (%s:%s)',
-                     nodeid, sender[0], sender[1])
-            return False
-        source = Node(nodeid, sender[0], sender[1])
-        self.welcome_if_new(source)
-        return self.source_node.id
+        if self.verify_integrity(sender, nodeid, puzzle):
+            source = Node(nodeid, sender[0], sender[1])
+            self.welcome_if_new(source)
+            return self.source_node.id
+        return False
 
-    def rpc_store(self, sender, nodeid, key, value):
-        source = Node(nodeid, sender[0], sender[1])
-        self.welcome_if_new(source)
-        log.debug("got a store request from %s, storing '%s'='%s'",
-                  sender, key.hex(), value)
-        self.storage[key] = value
-        return True
+    def rpc_store(self, sender, nodeid, key, value, puzzle):
+        if self.verify_integrity(sender, nodeid, puzzle):
+            source = Node(nodeid, sender[0], sender[1])
+            self.welcome_if_new(source)
+            log.debug("got a store request from %s, storing '%s'='%s'",
+                      sender, key.hex(), value)
+            self.storage[key] = value
+            return True
+        return False
 
-    def rpc_find_node(self, sender, nodeid, key):
-        log.info("finding neighbors of %i in local table",
-                 int(nodeid.hex(), 16))
-        source = Node(nodeid, sender[0], sender[1])
-        self.welcome_if_new(source)
-        node = Node(key)
-        neighbors = self.router.find_neighbors(node, exclude=source)
-        return list(map(tuple, neighbors))
+    def rpc_find_node(self, sender, nodeid, key, puzzle):
+        if self.verify_integrity(sender, nodeid, puzzle):
+            log.info("finding neighbors of %i in local table",
+                     int(nodeid.hex(), 16))
+            source = Node(nodeid, sender[0], sender[1])
+            self.welcome_if_new(source)
+            node = Node(key)
+            neighbors = self.router.find_neighbors(node, exclude=source)
+            return list(map(tuple, neighbors))
+        return False
 
-    def rpc_find_value(self, sender, nodeid, key):
-        source = Node(nodeid, sender[0], sender[1])
-        self.welcome_if_new(source)
-        value = self.storage.get(key, None)
-        if value is None:
-            return self.rpc_find_node(sender, nodeid, key)
-        return {'value': value}
+    def rpc_find_value(self, sender, nodeid, key, puzzle):
+        if self.verify_integrity(sender, nodeid, puzzle):
+            source = Node(nodeid, sender[0], sender[1])
+            self.welcome_if_new(source)
+            value = self.storage.get(key, None)
+            if value is None:
+                return self.rpc_find_node(sender, nodeid, key, puzzle)
+            return {'value': value}
+        return False
 
     async def call_find_node(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.find_node(address, self.source_node.id,
-                                      node_to_find.id)
+                                      node_to_find.id, self.create_integrity())
         return self.handle_call_response(result, node_to_ask)
 
     async def call_find_value(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.find_value(address, self.source_node.id,
-                                       node_to_find.id)
+                                       node_to_find.id,
+                                       self.create_integrity())
         return self.handle_call_response(result, node_to_ask)
 
     async def call_ping(self, node_to_ask):
         address = (node_to_ask.ip, node_to_ask.port)
-        puz = solve_puzzle(self.source_node.id)
-        log.debug('sending puzzle %s', puz.hex())
-        result = await self.ping(address, self.source_node.id, puz)
+        result = await self.ping(address, self.source_node.id,
+                                 self.create_integrity())
         return self.handle_call_response(result, node_to_ask)
 
     async def call_store(self, node_to_ask, key, value):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.store(address, self.source_node.id, key, value)
+        result = await self.store(address, self.source_node.id, key, value,
+                                  self.create_integrity())
         return self.handle_call_response(result, node_to_ask)
 
     def welcome_if_new(self, node):

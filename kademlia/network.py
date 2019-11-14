@@ -132,7 +132,9 @@ class Server:
         puz = solve_puzzle(self.node.id)
         log.debug('sending puzzle during bootstrap: %s', puz.hex())
         result = await self.protocol.ping(addr, self.node.id, puz)
-        return Node(result[1], addr[0], addr[1]) if result[0] else None
+        if result[0] and result[1]:
+            return Node(result[1], addr[0], addr[1])
+        return None
 
     async def get(self, key):
         """
